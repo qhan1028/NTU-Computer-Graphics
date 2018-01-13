@@ -1,0 +1,923 @@
+<html>
+
+<head>
+<title>ICG WebGL &mdash; HW1</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
+
+
+<!-- Shaders -->
+
+<script id="flat-fragmentShader" type="fragment">
+    #extension GL_OES_standard_derivatives : enable
+    
+    precision mediump float;
+    
+    varying vec4 vFrontColor;
+    varying vec4 vObjectPosition;
+
+    uniform float uObjectShininess;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uLightPosition;
+    uniform vec3 uLightColor;
+    uniform vec3 uLightPosition2;
+    uniform vec3 uLightColor2;
+
+    void main(void) {
+        // light
+        vec3 L = uLightPosition - vObjectPosition.xyz; // light direction
+        vec3 L2 = uLightPosition2 - vObjectPosition.xyz; // light direction
+
+        // calculate normal
+        vec3 U = dFdx(vObjectPosition.xyz);
+        vec3 V = dFdy(vObjectPosition.xyz);
+        vec3 N = normalize(cross(U,V));
+
+        float Ka = 0.1; float Kd = 0.4; float Ks = 0.5; float Ia = 7.5;
+
+        // calculate ambient
+        vec3 ambient = Ia * Ka * uAmbientColor;
+
+        // calculate diffuse
+        float cos_t = max(dot(N, normalize(L)), 0.0); // (sDotN)
+        vec3 diffuse = uLightColor * Kd * cos_t;
+
+        // calculate specular
+        vec3 H = normalize(L - vObjectPosition.xyz);
+        float cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        vec3 specular = uLightColor * Ks * cos_a;
+
+        // calculate diffuse 2
+        cos_t = max(dot(N, normalize(L2)), 0.0); // (sDotN)
+        diffuse += uLightColor2 * Kd * cos_t;
+
+        // calculate specular 2
+        H = normalize(L2 - vObjectPosition.xyz);
+        cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        specular += uLightColor2 * Ks * cos_a;
+
+        // gl_FragColor is the final color
+        gl_FragColor = vec4(vFrontColor.rgb * (ambient + diffuse + specular), vFrontColor.a);
+    }
+</script>
+
+<script id="flat-vertexShader" type="vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec4 aFrontColor;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    uniform sampler2D uSampler;
+
+    varying vec4 vObjectPosition; // camera is origin (0, 0, 0)
+    varying vec4 vFrontColor;
+
+    void main(void) {
+        vObjectPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+        gl_Position = uPMatrix * vObjectPosition; // gl_Position is the final position
+        vFrontColor = aFrontColor;
+    }
+</script>
+
+<script id="gouraud-fragmentShader" type="fragment">
+    #extension GL_OES_standard_derivatives : enable
+    precision mediump float;
+    varying vec4 objectColor;
+    void main(void) {
+        gl_FragColor = objectColor;
+    }
+</script>
+
+<script id="gouraud-vertexShader" type="vertex">
+    // object position
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec4 aFrontColor;
+
+    // world translate, camera position
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    uniform mat3 uNMatrix;
+
+    uniform float uObjectShininess;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uLightPosition;
+    uniform vec3 uLightColor;
+    uniform vec3 uLightPosition2;
+    uniform vec3 uLightColor2;
+
+    // color
+    varying vec4 objectColor;
+
+    void main(void) {
+        vec4 objectPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+        gl_Position = uPMatrix * objectPosition; // gl_Position is the final position
+        
+        // light
+        vec3 L = uLightPosition - objectPosition.xyz; // light direction
+        vec3 L2 = uLightPosition2 - objectPosition.xyz; // light direction 2
+
+        // calculate normal
+        vec3 N = normalize(uNMatrix * aVertexNormal);
+
+        float Ka = 0.1; float Kd = 0.4; float Ks = 0.5; float Ia = 7.5;
+
+        // calculate ambient
+        vec3 ambient = Ia * Ka * uAmbientColor;
+
+        // calculate diffuse
+        float cos_t = max(dot(N, normalize(L)), 0.0); // (sDotN)
+        vec3 diffuse = uLightColor * Kd * cos_t;
+
+        // calculate specular
+        vec3 H = normalize(L - objectPosition.xyz);
+        float cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        vec3 specular = uLightColor * Ks * cos_a;
+
+        // calculate diffuse 2
+        cos_t = max(dot(N, normalize(L2)), 0.0); // (sDotN)
+        diffuse += uLightColor2 * Kd * cos_t;
+
+        // calculate specular 2
+        H = normalize(L2 - objectPosition.xyz);
+        cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        specular += uLightColor2 * Ks * cos_a;
+
+        // gl_FragColor is the final color
+        objectColor = vec4(aFrontColor.rgb * (ambient + diffuse + specular), aFrontColor.a);
+    }
+</script>
+
+<script id="phong-fragmentShader" type="fragment">
+    #extension GL_OES_standard_derivatives : enable
+    precision mediump float;
+    
+    varying vec4 vObjectPosition;
+    varying vec3 vVertexNormal;
+    varying vec4 vFrontColor;
+
+    uniform mat3 uNMatrix;
+
+    uniform float uObjectShininess;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uLightPosition;
+    uniform vec3 uLightColor;
+    uniform vec3 uLightPosition2;
+    uniform vec3 uLightColor2;
+
+    void main(void) {
+        // light
+        vec3 L = uLightPosition - vObjectPosition.xyz; // light direction
+        vec3 L2 = uLightPosition2 - vObjectPosition.xyz; // light direction
+
+        // calculate normal
+        vec3 N = normalize(uNMatrix * vVertexNormal);;
+
+        float Ka = 0.1; float Kd = 0.4; float Ks = 0.5; float Ia = 7.5;
+
+        // calculate ambient
+        vec3 ambient = Ia * Ka * uAmbientColor;
+
+        // calculate diffuse
+        float cos_t = max(dot(N, normalize(L)), 0.0); // (sDotN)
+        vec3 diffuse = uLightColor * Kd * cos_t;
+
+        // calculate specular
+        vec3 H = normalize(L - vObjectPosition.xyz);
+        float cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        vec3 specular = uLightColor * Ks * cos_a;
+
+        // calculate diffuse 2
+        cos_t = max(dot(N, normalize(L2)), 0.0); // (sDotN)
+        diffuse += uLightColor2 * Kd * cos_t;
+
+        // calculate specular 2
+        H = normalize(L2 - vObjectPosition.xyz);
+        cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        specular += uLightColor2 * Ks * cos_a;
+
+        // gl_FragColor is the final color
+        gl_FragColor = vec4(vFrontColor.rgb * (ambient + diffuse + specular), vFrontColor.a);
+    }
+</script>
+
+<script id="phong-vertexShader" type="vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec4 aFrontColor;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    
+    varying vec4 vObjectPosition; // camera is origin (0, 0, 0)
+    varying vec3 vVertexNormal;
+    varying vec4 vFrontColor;
+
+    void main(void) {
+        vObjectPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+        gl_Position = uPMatrix * vObjectPosition; // gl_Position is the final position
+        
+        vVertexNormal = aVertexNormal;
+        vFrontColor = aFrontColor;
+    }
+</script>
+
+<script id="toon-fragmentShader" type="fragment">
+    #extension GL_OES_standard_derivatives : enable
+    precision mediump float;
+    
+    varying vec4 vObjectPosition;
+    varying vec3 vVertexNormal;
+    varying vec4 vFrontColor;
+
+    uniform mat3 uNMatrix;
+
+    uniform float uObjectShininess;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uLightPosition;
+    uniform vec3 uLightColor;
+    uniform vec3 uLightPosition2;
+    uniform vec3 uLightColor2;
+
+    void main(void) {
+        // light
+        vec3 L = uLightPosition - vObjectPosition.xyz; // light direction
+        vec3 L2 = uLightPosition2 - vObjectPosition.xyz; // light direction
+
+        // calculate normal
+        vec3 N = normalize(uNMatrix * vVertexNormal);;
+
+        float Ka = 0.1; float Kd = 0.4; float Ks = 0.5; float Ia = 7.5;
+
+        // calculate ambient
+        vec3 ambient = Ia * Ka * uAmbientColor;
+
+        // calculate diffuse
+        float cos_t = max(dot(N, normalize(L)), 0.0); // (sDotN)
+        vec3 diffuse = uLightColor * Kd * cos_t;
+
+        // calculate specular
+        vec3 H = normalize(L - vObjectPosition.xyz);
+        float cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        vec3 specular = uLightColor * Ks * cos_a;
+
+        // calculate diffuse 2
+        cos_t = max(dot(N, normalize(L2)), 0.0); // (sDotN)
+        diffuse += uLightColor2 * Kd * cos_t;
+
+        // calculate specular 2
+        H = normalize(L2 - vObjectPosition.xyz);
+        cos_a = max(pow(dot(H, N), uObjectShininess), 0.0);
+        specular += uLightColor2 * Ks * cos_a;
+
+        // gl_FragColor is the final color
+        gl_FragColor = vec4(ceil(vFrontColor.rgb * (ambient + diffuse + specular) * 5.0)/5.0, vFrontColor.a);
+    }
+</script>
+
+<script id="toon-vertexShader" type="vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec4 aFrontColor;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    
+    varying vec4 vObjectPosition; // camera is origin (0, 0, 0)
+    varying vec3 vVertexNormal;
+    varying vec4 vFrontColor;
+
+    void main(void) {
+        vObjectPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+        gl_Position = uPMatrix * vObjectPosition; // gl_Position is the final position
+        
+        vVertexNormal = aVertexNormal;
+        vFrontColor = aFrontColor;
+    }
+</script>
+
+
+<!-- Codes -->
+
+<script type="text/javascript">
+
+    /*************
+     *  Setup GL *
+     *************/ 
+
+    var gl;
+
+    function initGL(canvas) {
+        try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+        if (!gl.getExtension('OES_standard_derivatives')) {
+            throw 'extension not support';
+        }
+    }
+
+
+    /************************
+     *  Initialize Shaders  *
+     ************************/
+
+    function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+    var currentProgram;
+    var flatProgram;
+    var gouraudProgram;
+    var phongProgram;
+    var programs;
+
+    function initProgram(fragmentShaderID, vertexShaderID) {
+        var fragmentShader = getShader(gl, fragmentShaderID);
+        var vertexShader = getShader(gl, vertexShaderID);
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialize shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.positionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.positionAttribute);
+
+        shaderProgram.frontColorAttribute = gl.getAttribLocation(shaderProgram, "aFrontColor");
+        gl.enableVertexAttribArray(shaderProgram.frontColorAttribute);
+
+        shaderProgram.normalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+        gl.enableVertexAttribArray(shaderProgram.normalAttribute);
+
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+        shaderProgram.nMatrixUniform = gl.getUniformLocation(shaderProgram, "uNMatrix");
+        shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+
+        shaderProgram.objectShininessUniform = gl.getUniformLocation(shaderProgram, "uObjectShininess");
+        shaderProgram.ambientColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientColor");
+        shaderProgram.lightPositionUniform = gl.getUniformLocation(shaderProgram, "uLightPosition");
+        shaderProgram.lightColorUniform = gl.getUniformLocation(shaderProgram, "uLightColor");
+        shaderProgram.lightPositionUniform2 = gl.getUniformLocation(shaderProgram, "uLightPosition2");
+        shaderProgram.lightColorUniform2 = gl.getUniformLocation(shaderProgram, "uLightColor2");
+
+        return shaderProgram;
+    }
+
+    function initShaders() {
+        flatProgram = initProgram("flat-fragmentShader", "flat-vertexShader");
+        gouraudProgram = initProgram("gouraud-fragmentShader", "gouraud-vertexShader");
+        phongProgram = initProgram("phong-fragmentShader", "phong-vertexShader");
+        toonProgram = initProgram("toon-fragmentShader", "toon-vertexShader");
+        programs = [flatProgram, gouraudProgram, phongProgram, toonProgram];
+        currentProgram = flatProgram;
+    }
+
+    function degToRad(degrees) {
+        return degrees * Math.PI / 180;
+    }
+
+
+    /*****************
+     *  Load Csie  *
+     *****************/
+
+    var kangarooPositionBuffer;
+    var kangarooNormalBuffer;
+    var kangarooFrontColorBuffer;
+
+    function handleLoadedKangaroo(data) {
+        kangarooFrontColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, kangarooFrontColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertexFrontcolors), gl.STATIC_DRAW);
+        kangarooFrontColorBuffer.itemSize = 3;
+        kangarooFrontColorBuffer.numItems = data.vertexFrontcolors.length / 3;
+
+        kangarooPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, kangarooPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertexPositions), gl.STATIC_DRAW);
+        kangarooPositionBuffer.itemSize = 3;
+        kangarooPositionBuffer.numItems = data.vertexPositions.length / 3;
+
+        kangarooNormalBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, kangarooNormalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertexNormals), gl.STATIC_DRAW);
+        kangarooNormalBuffer.itemSize = 3;
+        kangarooNormalBuffer.numItems = data.vertexNormals.length / 3;
+    }
+
+    function loadKangarooData() {
+        var request = new XMLHttpRequest();
+        request.open("GET", "Kangaroo.json");
+        request.onreadystatechange = function () {
+            if (request.readyState == 4) {
+                handleLoadedKangaroo(JSON.parse(request.responseText));
+            }
+        }
+        request.send();
+    }
+
+    /*******************
+     *  Load Tomcat  *
+     *******************/
+
+    var csiePositionBuffer;
+    var csieNormalBuffer;
+    var csieFrontColorBuffer;
+
+    function handleLoadedCsie(data) {
+        csieFrontColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, csieFrontColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertexFrontcolors), gl.STATIC_DRAW);
+        csieFrontColorBuffer.itemSize = 3;
+        csieFrontColorBuffer.numItems = data.vertexFrontcolors.length / 3;
+
+        csiePositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, csiePositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertexPositions), gl.STATIC_DRAW);
+        csiePositionBuffer.itemSize = 3;
+        csiePositionBuffer.numItems = data.vertexPositions.length / 3;
+
+        csieNormalBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, csieNormalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.vertexNormals), gl.STATIC_DRAW);
+        csieNormalBuffer.itemSize = 3;
+        csieNormalBuffer.numItems = data.vertexNormals.length / 3;
+    }
+
+    function loadCsieData() {
+        var request = new XMLHttpRequest();
+        request.open("GET", "Csie.json");
+        request.onreadystatechange = function () {
+            if (request.readyState == 4) {
+                handleLoadedCsie(JSON.parse(request.responseText));
+            }
+        }
+        request.send();
+    }
+
+
+    /**********
+     *  Draw  *
+     **********/
+
+    var mvMatrix = mat4.create();
+    var pMatrix = mat4.create();
+    var nMatrix = mat3.create();
+    var sMatrix = mat4.create();
+
+    function setUniforms() {
+        gl.uniformMatrix4fv(currentProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(currentProgram.mvMatrixUniform, false, mvMatrix);
+        
+        mat4.toInverseMat3(mvMatrix, nMatrix);
+        mat3.transpose(nMatrix);
+        gl.uniformMatrix3fv(currentProgram.nMatrixUniform, false, nMatrix);
+
+        gl.uniform1f(
+            currentProgram.objectShininessUniform,
+            parseFloat(document.getElementById("objectShininess").value)
+        );
+
+        gl.uniform3f(
+            currentProgram.ambientColorUniform,
+            parseFloat(document.getElementById("ambientColorR").value),
+            parseFloat(document.getElementById("ambientColorG").value),
+            parseFloat(document.getElementById("ambientColorB").value)
+        );
+
+        gl.uniform3f(
+            currentProgram.lightPositionUniform, 
+            parseFloat(document.getElementById("lightPositionX").value),
+            parseFloat(document.getElementById("lightPositionY").value),
+            parseFloat(document.getElementById("lightPositionZ").value)
+        );
+
+        gl.uniform3f(
+            currentProgram.lightColorUniform,
+            parseFloat(document.getElementById("lightColorR").value),
+            parseFloat(document.getElementById("lightColorG").value),
+            parseFloat(document.getElementById("lightColorB").value)
+        );
+
+        gl.uniform3f(
+            currentProgram.lightPositionUniform2, 
+            parseFloat(document.getElementById("lightPositionX2").value),
+            parseFloat(document.getElementById("lightPositionY2").value),
+            parseFloat(document.getElementById("lightPositionZ2").value)
+        );
+
+        gl.uniform3f(
+            currentProgram.lightColorUniform2,
+            parseFloat(document.getElementById("lightColorR2").value),
+            parseFloat(document.getElementById("lightColorG2").value),
+            parseFloat(document.getElementById("lightColorB2").value)
+        );
+    }
+
+    function setKangarooAttributes() {
+        gl.bindBuffer(gl.ARRAY_BUFFER, kangarooPositionBuffer);
+        gl.vertexAttribPointer(currentProgram.positionAttribute, kangarooPositionBuffer.itemSize, gl.FLOAT, false, 0, 0); // load model local position data into shader
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, kangarooFrontColorBuffer);
+        gl.vertexAttribPointer(currentProgram.frontColorAttribute, kangarooFrontColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, kangarooNormalBuffer);
+        gl.vertexAttribPointer(currentProgram.normalAttribute, kangarooNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+    }
+
+    function setCsieAttributes() {
+        gl.bindBuffer(gl.ARRAY_BUFFER, csiePositionBuffer);
+        gl.vertexAttribPointer(currentProgram.positionAttribute, csiePositionBuffer.itemSize, gl.FLOAT, false, 0, 0); // load model local position data into shader
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, csieFrontColorBuffer);
+        gl.vertexAttribPointer(currentProgram.frontColorAttribute, csieFrontColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, csieNormalBuffer);
+        gl.vertexAttribPointer(currentProgram.normalAttribute, csieNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+    }
+    
+    var shaderTypes = [0, 1, 2]
+    var translates = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    var scales = [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]];
+    var lastRotateMatrix = [mat4.create(), mat4.create(), mat4.create()];
+    var angles = [0.0, 0.0, 0.0];
+    var lastAxes = [1, 1, 1];
+    var axes = [1, 1, 1]; // rotated axis. (0: x, 1: y, 2: z)
+    var shears = [mat4.create(), mat4.create(), mat4.create()];
+
+    var shearIndex = [4, 9, 2];
+    var rotateIndex = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+    var caseNames = ["flat", "gouraud", "phong"];
+    var axisNames = ["X", "Y", "Z"];
+
+    var csieShaderType = 0;
+
+    function initRotate() {
+        for (i = 0; i < 3; i++) {
+            mat4.identity(lastRotateMatrix[i]);
+            mat4.rotate(lastRotateMatrix[i], degToRad(-90), rotateIndex[0]);
+        }
+    }
+
+    function getParameters() {
+        for (c = 0; c < 3; c++) {
+            shaderTypes[c] = document.getElementById("shaderType" + (c+1).toString()).value;
+            var selectedAxis = document.getElementsByName(caseNames[c] + "Rotate");
+            mat4.identity(shears[c]);
+
+            for (a = 0; a < 3; a++) {
+                translates[c][a] = document.getElementById(caseNames[c] + "Position" + axisNames[a]).value;
+                scales[c][a] = document.getElementById(caseNames[c] + "Scale" + axisNames[a]).value;
+                shears[c][shearIndex[a]] = document.getElementById(caseNames[c] + "Shear" + axisNames[a]).value;
+                if (selectedAxis[a].checked) axes[c] = a;
+            }
+        }
+        csieShaderType = document.getElementById("csieShaderType").value;
+    }
+
+    function drawScene() {
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        if (kangarooPositionBuffer == null || kangarooNormalBuffer == null || kangarooFrontColorBuffer == null) {
+            return;
+        }
+
+        // set camera position and fov
+        mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 40.0, pMatrix);
+
+        // parse translation, scale, rotation parameter from html
+        getParameters();
+
+        // draw csie with 3 different shadings
+        for (i = 0; i < 3; i++) {
+            currentProgram = programs[shaderTypes[i]];
+            gl.useProgram(currentProgram);
+            setKangarooAttributes();
+            
+            mat4.identity(mvMatrix); // make mvMatrix (target object) identity
+            mat4.translate(mvMatrix, translates[i]); // translate
+            mat4.multiply(mvMatrix, lastRotateMatrix[i]); // rotate
+            mat4.rotate(mvMatrix, degToRad(angles[i]), rotateIndex[axes[i]]); // rotate animation
+            mat4.multiply(mvMatrix, shears[i]); // shear
+            mat4.scale(mvMatrix, scales[i]); // scale
+            setUniforms();
+            
+            gl.drawArrays(gl.TRIANGLES, 0, kangarooPositionBuffer.numItems);
+        }
+
+        // draw csie with phong shading
+        currentProgram = programs[csieShaderType];
+        gl.useProgram(currentProgram);
+        
+        setCsieAttributes();
+        
+        mat4.identity(mvMatrix); // make mvMatrix (target object) identity
+        mat4.translate(mvMatrix, [-4.3, -2.65, -8.6]); // translate
+        mat4.rotate(mvMatrix, degToRad(-90), rotateIndex[0]); // rotate animation
+        mat4.scale(mvMatrix, [10.0, 10.0, 10.0]); // scale
+        setUniforms();
+        
+        gl.drawArrays(gl.TRIANGLES, 0, csiePositionBuffer.numItems);
+    }
+
+    var lastTime = 0;
+    var rotateSpeed = 0.05;
+
+    function animate() {
+        var timeNow = new Date().getTime();
+        if (lastTime != 0) {
+            var elapsed = timeNow - lastTime;
+            for (c = 0; c < 3; c++) {
+                if (lastAxes[c] != axes[c]) {
+                    mat4.rotate(lastRotateMatrix[c], degToRad(angles[c]), rotateIndex[lastAxes[c]]);
+                    lastAxes[c] = axes[c];
+                    angles[c] = 0.0;
+                }
+                angles[c] += rotateSpeed * elapsed;
+                if (angles[c] > 360.0) angles[c] -= 360.0;
+            }
+        }
+        lastTime = timeNow;
+    }
+
+
+    function tick() {
+        requestAnimFrame(tick);
+        drawScene();
+        animate();
+    }
+
+
+    function webGLStart() {
+        var canvas = document.getElementById("ICG-canvas");
+        initGL(canvas);
+        initShaders();
+        loadKangarooData();
+        loadCsieData();
+
+        gl.clearColor(0.0, 0.2, 0.2, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+
+        initRotate();
+        tick();
+    }
+
+</script>
+
+</head>
+
+<style>
+table{
+    border: 1px solid black;
+    border-width: 1px;
+    float: left;
+    display: inline-block;
+}
+th, td {
+}
+</style>
+
+<body onload="webGLStart();">
+
+<div>
+    <canvas id="ICG-canvas" style="border: none;" width="800" height="400"></canvas>
+</div>
+    
+<hr>
+
+<div>
+    <form oninput="fx.value=parseFloat(flatPositionX.value);fy.value=parseFloat(flatPositionY.value);fz.
+               value=parseFloat(flatPositionZ.value);
+
+               gx.value=parseFloat(gouraudPositionX.value);gy.value=parseFloat(gouraudPositionY.value);gz.value=parseFloat(gouraudPositionZ.value);
+
+               px.value=parseFloat(phongPositionX.value);py.value=parseFloat(phongPositionY.value);pz.value=parseFloat(phongPositionZ.value);
+
+               fxs.value=parseFloat(flatScaleX.value);fys.value=parseFloat(flatScaleY.value);fzs.value=parseFloat(flatScaleZ.value);
+
+               gxs.value=parseFloat(gouraudScaleX.value);gys.value=parseFloat(gouraudScaleY.value);gzs.value=parseFloat(gouraudScaleZ.value);
+
+               pxs.value=parseFloat(phongScaleX.value);pys.value=parseFloat(phongScaleY.value);pzs.value=parseFloat(phongScaleZ.value);
+
+               fxsh.value=parseFloat(flatShearX.value);fysh.value=parseFloat(flatShearY.value);fzsh.value=parseFloat(flatScaleZ.value);
+
+               gxsh.value=parseFloat(gouraudShearX.value);gysh.value=parseFloat(gouraudShearY.value);gzsh.value=parseFloat(gouraudShearZ.value);
+
+               pxsh.value=parseFloat(phongShearX.value);pysh.value=parseFloat(phongShearY.value);pzsh.value=parseFloat(phongShearZ.value);">
+        <table rules="all" cellpadding="5px">
+            <th>
+                <td><b>Kangaroo 1</b>
+                    <select id="shaderType1" autocomplete="off">
+                        <option value="0" selected>Flat</option>
+                        <option value="1">Gouraud</option>
+                        <option value="2">Phong</option>
+                        <option value="3">Toon</option>
+                    </select>
+                <td><b>Kangaroo 2</b>
+                    <select id="shaderType2" autocomplete="off">
+                        <option value="0">Flat</option>
+                        <option value="1" selected>Gouraud</option>
+                        <option value="2">Phong</option>
+                        <option value="3">Toon</option>
+                    </select>
+                <td><b>Kangaroo 3</b>
+                    <select id="shaderType3" autocomplete="off">
+                        <option value="0">Flat</option>
+                        <option value="1">Gouraud</option>
+                        <option value="2" selected>Phong</option>
+                        <option value="3">Toon</option>
+                    </select>
+            </th>
+
+            <tr id="translate">
+                <td><b>Translate</b>
+                <td style="width: 210px"><input id ="flatPositionX" type="range" value="-3.0" onchange="GetValue(this.id)" step="0.05" max="23.0" min="-23.0" autocomplete="off"></input>X: <output name="fx"></output>
+                <td style="width: 210px"><input id ="gouraudPositionX" type="range" value="0.0" onchange="GetValue(this.id)" step="0.05" max="23.0" min="-23.0" autocomplete="off"></input>X: <output name="gx"></output>
+                <td style="width: 210px"><input id ="phongPositionX" type="range" value="3.0" onchange="GetValue(this.id)" step="0.05" max="23.0" min="-23.0" autocomplete="off"></input>X: <output name="px"></output>
+            </tr>
+            <tr>
+                <td>
+                <td style="width: 210px"><input id ="flatPositionY" type="range" value="0.0" onchange="GetValue(this.id)" step="0.05" max="10.0" min="-10.0" autocomplete="off"></input>Y: <output name="fy"></output>
+                <td style="width: 210px"><input id ="gouraudPositionY" type="range" value="0.0" onchange="GetValue(this.id)" step="0.05" max="10.0" min="-10.0" autocomplete="off"></input>Y: <output name="gy"></output>
+                <td style="width: 210px"><input id ="phongPositionY" type="range" value="0.0" onchange="GetValue(this.id)" step="0.05" max="10.0" min="-10.0" autocomplete="off"></input>Y: <output name="py"></output>
+            </tr>
+            <tr>
+                <td>
+                <td style="width: 200px"><input id ="flatPositionZ" type="range" value="-7.0" onchange="GetValue(this.id)" step="0.05" max="-1.0" min="-30.0" autocomplete="off"></input>Z: <output name="fz"></output>
+                <td style="width: 200px"><input id ="gouraudPositionZ" type="range" value="-7.0" onchange="GetValue(this.id)" step="0.05" max="-1.0" min="-30.0" autocomplete="off"></input>Z: <output name="gz"></output>
+                <td style="width: 200px"><input id ="phongPositionZ" type="range" value="-7.0" onchange="GetValue(this.id)" step="0.05" max="-1.0" min="-30.0" autocomplete="off"></input>Z: <output name="pz"></output>
+            </tr>
+
+            <tr id="scale">
+                <td><b>Scale</b>
+                <td><input id ="flatScaleX" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>X: <output name="fxs"></output>
+                <td><input id ="gouraudScaleX" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>X: <output name="gxs"></output>
+                <td><input id ="phongScaleX" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>X: <output name="pxs"></output>
+            </tr>
+            <tr>
+                <td>
+                <td style="width: 210px"><input id ="flatScaleY" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>Y: <output name="fys"></output>
+                <td style="width: 210px"><input id ="gouraudScaleY" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>Y: <output name="gys"></output>
+                <td style="width: 210px"><input id ="phongScaleY" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>Y: <output name="pys"></output>
+            </tr>
+            <tr>
+                <td>
+                <td><input id ="flatScaleZ" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>Z: <output name="fzs"></output>
+                <td><input id ="gouraudScaleZ" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>Z: <output name="gzs"></output>
+                <td><input id ="phongScaleZ" type="range" value="2.0" onchange="GetValue(this.id)" step="0.01" max="10.0" min="0.1" autocomplete="off"></input>Z: <output name="pzs"></output>
+            </tr>
+
+            <tr id="shear">
+                <td><b>Shear</b>
+                <td><input id ="flatShearX" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>X: <output name="fxsh"></output>
+                <td><input id ="gouraudShearX" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>X: <output name="gxsh"></output>
+                <td><input id ="phongShearX" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>X: <output name="pxsh"></output>
+            </tr>
+            <tr>
+                <td>
+                <td><input id ="flatShearY" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>Y: <output name="fysh"></output>
+                <td><input id ="gouraudShearY" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>Y: <output name="gysh"></output>
+                <td><input id ="phongShearY" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>Y: <output name="pysh"></output>
+            </tr>
+            <tr>
+                <td>
+                <td><input id ="flatShearZ" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>Z: <output name="fzsh"></output>
+                <td><input id ="gouraudShearZ" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>Z: <output name="gzsh"></output>
+                <td><input id ="phongShearZ" type="range" value="0.0" onchange="GetValue(this.id)" step="0.01" max="2.0" min="-2.0" autocomplete="off"></input>Z: <output name="pzsh"></output>
+            </tr>
+
+
+            <tr id="rotate">
+                <td><b>Rotate Axis</b>
+                <td>
+                    X<input name="flatRotate" type="radio" value="0" checked autocomplete="off">
+                    Y<input name="flatRotate" type="radio" value="1" autocomplete="off">
+                    Z<input name="flatRotate" type="radio" value="2" autocomplete="off">
+                <td>
+                    X<input name="gouraudRotate" type="radio" value="0" autocomplete="off">
+                    Y<input name="gouraudRotate" type="radio" value="1" checked autocomplete="off">
+                    Z<input name="gouraudRotate" type="radio" value="2" autocomplete="off">
+                <td>
+                    X<input name="phongRotate" type="radio" value="0" autocomplete="off">
+                    Y<input name="phongRotate" type="radio" value="1" autocomplete="off">
+                    Z<input name="phongRotate" type="radio" value="2" checked autocomplete="off">
+            </tr>
+            <tr>
+                <td><b>
+            </tr>
+        </table>
+    </form>
+    <form oninput="s.value=parseInt(objectShininess.value);
+
+            ar.value=parseFloat(ambientColorR.value);ag.value=parseFloat(ambientColorG.value);ab.value=parseFloat(ambientColorB.value);
+
+            lx.value=parseInt(lightPositionX.value);ly.value=parseInt(lightPositionY.value);lz.value=parseInt(lightPositionZ.value);
+           
+            lr.value=parseFloat(lightColorR.value);lg.value=parseFloat(lightColorG.value);lb.value=parseInt(lightColorB.value);
+           
+            lx2.value=parseInt(lightPositionX2.value);ly2.value=parseInt(lightPositionY2.value);lz2.value=parseInt(lightPositionZ2.value);
+           
+            lr2.value=parseFloat(lightColorR2.value);lg2.value=parseFloat(lightColorG2.value);lb2.value=parseInt(lightColorB2.value);">
+        <table rules="all" cellpadding="5px">
+            <tr id="shininess">
+                <td><b>Shininess</b>  
+                <td style="width: 200px"><input id="objectShininess" type="range" value="2.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="0.0" autocomplete="off"></input><output type="number" name="s"></output>
+                <td><b>CSIE Shading</b>
+                <td><select id="csieShaderType">
+                    <option value="0">Flat</option>
+                    <option value="1">Gouraud</option>
+                    <option value="2">Phong</option>
+                    <option value="3">Toon</option>
+                </select>
+            </tr>
+
+            <tr id="ambient-color">
+                <td><b>Ambient Color</b></td>
+                <td><input type="range" id="ambientColorR" value="0.5" onchange="GetValue(this.id)" step="0.05" max="1.0" min="0.0" autocomplete="off"></input>R: <output name="ar"></output>
+                <td><input type="range" id="ambientColorG" value="0.5" onchange="GetValue(this.id)" step="0.05" max="1.0" min="0.0" autocomplete="off"></input>G: <output name="ag"></output>
+                <td><input type="range" id="ambientColorB" value="0.5" onchange="GetValue(this.id)" step="0.05" max="1.0" min="0.0" autocomplete="off"></input>B: <output name="ab"></output>
+            </tr>
+
+            <tr id="point-light-location-1">
+                <td><b>Point Light Location 1 </b>
+                <td style="width: 200px"><input id ="lightPositionX" type="range" value="-50.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="-100.0" autocomplete="off"></input>X: <output name="lx"></output>
+                <td style="width: 200px"><input id ="lightPositionY" type="range" value="20.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="-100.0" autocomplete="off"></input>Y: <output name="ly"></output>
+                <td style="width: 200px"><input id ="lightPositionZ" type="range" value="-20.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="-100.0" autocomplete="off"></input>Z: <output name="lz"></output>
+            </tr>
+
+            <tr id="point-light-color-1">
+                <td><b>Point Light Color 1</b>
+                <td style="width: 200px"><input type="range" id="lightColorR" value="0.8" onchange="GetValue(this.id)" step="0.01" max="1.0" min="0.0" autocomplete="off"></input>R: <output name="lr"></output>
+                <td style="width: 200px"><input type="range" id="lightColorG" value="0.8" onchange="GetValue(this.id)" step="0.01" max="1.0" min="0.0" autocomplete="off"></input>G: <output name="lg"></output>
+                <td style="width: 200px"><input type="range" id="lightColorB" value="0.8" onchange="GetValue(this.id)" step="0.01" max="1.0" min="0.0" autocomplete="off"></input>B: <output name="lb"></output>
+            </tr>
+
+            <tr id="point-light-location-2">
+                <td><b>Point Light Location 2</b>
+                <td style="width: 200px"><input id ="lightPositionX2" type="range" value="60.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="-100.0" autocomplete="off"></input>X: <output name="lx2"></output>
+                <td style="width: 200px"><input id ="lightPositionY2" type="range" value="-65.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="-100.0" autocomplete="off"></input>Y: <output name="ly2"></output>
+                <td style="width: 200px"><input id ="lightPositionZ2" type="range" value="10.0" onchange="GetValue(this.id)" step="1.0" max="100.0" min="-100.0" autocomplete="off"></input>Z: <output name="lz2"></output>
+            </tr>
+
+            <tr id="point-light-color-2">
+                <td><b>Point Light Color 2</b>
+                <td style="width: 200px"><input type="range" id="lightColorR2" value="0.8" onchange="GetValue(this.id)" step="0.01" max="1.0" min="0.0" autocomplete="off"></input>R: <output name="lr2"></output>
+                <td style="width: 200px"><input type="range" id="lightColorG2" value="0.8" onchange="GetValue(this.id)" step="0.01" max="1.0" min="0.0" autocomplete="off"></input>G: <output name="lg2"></output>
+                <td style="width: 200px"><input type="range" id="lightColorB2" value="0.8" onchange="GetValue(this.id)" step="0.01" max="1.0" min="0.0" autocomplete="off"></input>B: <output name="lb2"></output>
+            </tr>
+        </table>
+    </form>
+</div>
+
+</body>
+
+</html>
